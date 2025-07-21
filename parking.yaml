@@ -96,13 +96,39 @@ select:
     optimistic: true
     entity_category: config
 
+globals:
+  - id: car_is_parked
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+script:
+  - id: turn_off_leds_timer #This timer turns off the LEDs after the specified time. 
+    mode: single #This only allows the script to run once. (ex: lights only turn on for 2 min then turn off)
+    then:
+      - delay: !lambda "return id(light_timer_time).state * 60 * 1000;"
+      - light.turn_off: parking_leds
+
+  - id: set_car_parked #This sets the status of the car to park to prevent false positives. Also prevents the lights from turing on when you walk between the car and the sensor.
+    mode: restart
+    then:
+      - delay: 30s
+      - lambda: |-
+          id(car_is_parked) = true;
+
+  - id: set_car_away #This sets the status of the car to away so that the lights will work as intended.
+    mode: restart
+    then:
+      - lambda: |-
+          id(car_is_parked) = false;
+
 # Sensor configuration for the HC-SR04
 sensor:
   - platform: ultrasonic
     name: "Parking Sensor Distance"
     id: parking_sensor_distance
-    trigger_pin: GPIO25  # TRIG pin connected to D1
-    echo_pin: GPIO26  # ECHO pin connected to D2
+    trigger_pin: GPIO25  # TRIG pin connected to D25
+    echo_pin: GPIO26  # ECHO pin connected to D26
     update_interval: 333ms
     accuracy_decimals: 1
     unit_of_measurement: "in"
@@ -112,10 +138,15 @@ sensor:
     on_value_range:
       - below: !lambda "return id(Backup_Zone).state;"
         then:
-          - light.turn_on:
-              id: parking_leds
-              effect: "Strobe"
-          - script.execute: turn_off_leds_timer
+          - if:
+              condition:
+                lambda: |-
+                  return id(car_is_parked) == false;
+              then:
+                - light.turn_on:
+                    id: parking_leds
+                    effect: "Strobe"
+                - script.execute: turn_off_leds_timer
       - above: !lambda "return id(Backup_Zone).state;"
         below: !lambda "return id(Stop_Zone).state;"
         then:
@@ -127,6 +158,7 @@ sensor:
               blue: 0%
               white: 0%
           - script.execute: turn_off_leds_timer
+          - script.execute: set_car_parked
       - above: !lambda "return id(Stop_Zone).state;"
         below: !lambda "return id(Approach_Zone).state;"
         then:
@@ -138,6 +170,7 @@ sensor:
               blue: 0%
               white: 0%
           - script.execute: turn_off_leds_timer
+          - script.execute: set_car_away
       - above: !lambda "return id(Approach_Zone).state;"
         then:
           - light.turn_on:
@@ -148,6 +181,7 @@ sensor:
               blue: 0%
               white: 0%
           - script.execute: turn_off_leds_timer
+          - script.execute: set_car_away
 text_sensor:  
   - platform: template
     name: "Car in Garage"
@@ -167,7 +201,7 @@ light:
     name: "Parking Assistant LEDs"
     id: parking_leds
     pin: GPIO04  # Data pin connected to D4
-    num_leds: 57
+    num_leds: 57 # Number of LEDs
     restore_mode: ALWAYS_OFF
     effects:
       - strobe:
@@ -215,10 +249,3 @@ light:
             it[(startLEDLeft - i)] = Color(255, 255, 0, 0);  // Yellow
             it[(startLEDRight + i)] = Color(255, 255, 0, 0);
               }
-
-script:
-  - id: turn_off_leds_timer
-    mode: single
-    then:
-      - delay: !lambda "return id(light_timer_time).state * 60 * 1000;"
-      - light.turn_off: parking_leds

@@ -36,7 +36,7 @@ web_server:
 # Distance numbers for each zone
 number:
   - platform: template
-    name: "Distance 1: Apporach Zone"
+    name: "Distance 1: Approach Zone"
     id: Approach_Zone
     min_value: 1
     max_value: 100

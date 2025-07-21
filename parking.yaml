@@ -1,0 +1,225 @@
+esphome:
+  name: parking
+  friendly_name: Parking Assistant
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+    
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "7zk+rbEw6VGUqPf96T1I/fibzgYpqXWvRqGTk93mtsw="
+
+ota:
+  - platform: esphome
+    password: "5a707156e057078d9f1c84de29db66e4"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Garage Fallback Hotspot"
+    password: "byPnw6QTWxes"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+# Distance numbers for each zone
+number:
+  - platform: template
+    name: "Distance 1: Apporach Zone"
+    id: Approach_Zone
+    min_value: 1
+    max_value: 100
+    step: 0.1
+    initial_value: 20.0
+    restore_value: True
+    optimistic: True
+    entity_category: config
+    unit_of_measurement: "in"
+    mode: box
+  - platform: template
+    name: "Distance 2: Stop Zone"
+    id: Stop_Zone
+    min_value: 1
+    max_value: 100
+    step: 0.1
+    initial_value: 10.0
+    restore_value: True
+    optimistic: True
+    entity_category: config
+    unit_of_measurement: "in"
+    mode: box
+  - platform: template
+    name: "Distance 3: Backup Zone"
+    id: Backup_Zone
+    min_value: 1
+    max_value: 100
+    step: 0.1
+    initial_value: 5.0
+    restore_value: True
+    optimistic: True
+    entity_category: config
+    unit_of_measurement: "in"
+    mode: box
+  - platform: template
+    name: "Lights Timer"
+    id: light_timer_time
+    min_value: 1
+    max_value: 100
+    step: 0.5
+    initial_value: 2.0
+    restore_value: True
+    optimistic: True
+    entity_category: config
+    unit_of_measurement: "min"
+    mode: box
+
+select:
+  - platform: template
+    name: Approach Effect
+    id: approach_effect
+    options:
+     - "Out-In"
+     - "In-Out"
+     - "None"
+    initial_option: "Out-In"
+    optimistic: true
+    entity_category: config
+
+# Sensor configuration for the HC-SR04
+sensor:
+  - platform: ultrasonic
+    name: "Parking Sensor Distance"
+    id: parking_sensor_distance
+    trigger_pin: GPIO25  # TRIG pin connected to D1
+    echo_pin: GPIO26  # ECHO pin connected to D2
+    update_interval: 333ms
+    accuracy_decimals: 1
+    unit_of_measurement: "in"
+    filters:
+      - lambda: return x * 39.3701; # convert meters to inches
+      - delta: 0.5
+    on_value_range:
+      - below: !lambda "return id(Backup_Zone).state;"
+        then:
+          - light.turn_on:
+              id: parking_leds
+              effect: "Strobe"
+          - script.execute: turn_off_leds_timer
+      - above: !lambda "return id(Backup_Zone).state;"
+        below: !lambda "return id(Stop_Zone).state;"
+        then:
+          - light.turn_on:
+              id: parking_leds
+              effect: "None"
+              red: 100%
+              green: 0%
+              blue: 0%
+              white: 0%
+          - script.execute: turn_off_leds_timer
+      - above: !lambda "return id(Stop_Zone).state;"
+        below: !lambda "return id(Approach_Zone).state;"
+        then:
+          - light.turn_on:
+              id: parking_leds
+              effect: !lambda "return id(approach_effect).state;"
+              red: 100%
+              green: 100%
+              blue: 0%
+              white: 0%
+          - script.execute: turn_off_leds_timer
+      - above: !lambda "return id(Approach_Zone).state;"
+        then:
+          - light.turn_on:
+              id: parking_leds
+              effect: "None"
+              red: 0%
+              green: 100%
+              blue: 0%
+              white: 0%
+          - script.execute: turn_off_leds_timer
+text_sensor:  
+  - platform: template
+    name: "Car in Garage"
+    lambda: |-
+      if (id(parking_sensor_distance).state < id(Stop_Zone).state) {
+        return {"Present"};
+      } else {
+        return {"Not Present"};
+      }
+    update_interval: 60s
+
+# LED strip configuration (SK6812)
+light:
+  - platform: neopixelbus
+    type: GRBW
+    variant: SK6812
+    name: "Parking Assistant LEDs"
+    id: parking_leds
+    pin: GPIO04  # Data pin connected to D4
+    num_leds: 57
+    restore_mode: ALWAYS_OFF
+    effects:
+      - strobe:
+      - addressable_lambda:
+          name: "Out-In"
+          update_interval: 200ms
+          lambda: |-
+            const int total_leds = it.size();
+            float dist = id(parking_sensor_distance).state;
+            float ratio = (id(Approach_Zone).state - id(Stop_Zone).state) / (total_leds / 2);  
+            int pixels_to_light = int((id(Approach_Zone).state - dist) / ratio);            
+
+            // Turn off all LEDs
+            it.all() = Color(0, 0, 0, 0);
+
+            // Light from both ends toward center
+            if(pixels_to_light ==0 ) pixels_to_light = 1;
+            for (int i = 0; i < pixels_to_light; i++) {
+            it[i] = Color(255, 255, 0, 0);  // Yellow
+            it[(total_leds - 1) - i] = Color(255, 255, 0, 0);
+              }
+      - addressable_lambda:
+          name: "In-Out"
+          update_interval: 200ms
+          lambda: |-
+            const int total_leds = it.size();
+            byte startLEDLeft = 0;
+            byte startLEDRight = 0;
+            float dist = id(parking_sensor_distance).state;
+            float ratio = (id(Approach_Zone).state - id(Stop_Zone).state) / (total_leds / 2);  
+            int pixels_to_light = int((id(Approach_Zone).state - dist) / ratio);            
+
+            // Turn off all LEDs
+            it.all() = Color(0, 0, 0, 0);
+
+            // Light from both ends toward center
+            if(pixels_to_light ==0 ) pixels_to_light = 1;
+            //Find center LED(s) - single of odd number, two if even number of LEDS
+            startLEDLeft = (total_leds / 2);
+            startLEDRight = startLEDLeft;
+            if ((startLEDLeft % 2) == 0) {
+              startLEDLeft --;
+            }
+            for (int i = 0; i < pixels_to_light; i++) {
+            it[(startLEDLeft - i)] = Color(255, 255, 0, 0);  // Yellow
+            it[(startLEDRight + i)] = Color(255, 255, 0, 0);
+              }
+
+script:
+  - id: turn_off_leds_timer
+    mode: single
+    then:
+      - delay: !lambda "return id(light_timer_time).state * 60 * 1000;"
+      - light.turn_off: parking_leds

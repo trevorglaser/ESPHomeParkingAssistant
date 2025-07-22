@@ -47,5 +47,3 @@ In Home Assistant, adjust:
 
 All parameters are adjustable live via the Home Assistant dashboard.
 
-<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/5726edbf-a7c3-4984-ad06-60e906dea630" />
-
